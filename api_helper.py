@@ -33,7 +33,7 @@ class APIFetch:
     def close_connection(self):
         if self.cursor is not None and not self.cursor.closed:
             self.cursor.close()
-        if self.connection is not None and self.connection.closed == 0:
+        if self.connection is not None and  self.connection.closed == 0:
             self.connection.close()
 
     @log_time
@@ -42,18 +42,24 @@ class APIFetch:
             for table_name, data in data_to_insert.items():
                 if table_name == "country":
                     for country in data:
-                        self._insert_country(country)
+                        self._insert_generic("country", {"country_name": country})
                 elif table_name == "university":
                     for country, universities in data.items():
-                        country_id = self._insert_country(country)
+                        country_id = self._insert_generic("country", {"country_name": country})
                         for university in universities:
-                            university_name = university['name']
-                            self._insert_university(university_name, country_id)
+                            university_data = {
+                                "university_name": university['name'],
+                                "country_id": country_id
+                            }
+                            self._insert_generic("university", university_data)
                 elif table_name == "person":
                     for person_data in data:
-                        country = person_data['location']['country']
-                        country_id = self._insert_country(country)
-                        self._insert_person(person_data, country_id)
+                        flattened_data = self._flatten_person_data(person_data)
+                        country = flattened_data['country']
+                        country_id = self._insert_generic("country", {"country_name": country})
+                        flattened_data['country_id'] = country_id
+                        del flattened_data['country']
+                        self._insert_generic("person", flattened_data)
             yield "Data insertion completed."
         except Error as e:
             self.connection.rollback()  # Rollback the transaction
@@ -62,48 +68,32 @@ class APIFetch:
         except psycopg2.InterfaceError as e:
             logging.error(f"InterfaceError occurred: {e}")
 
-    def _insert_country(self, country_name):
+    def _insert_generic(self, table_name, data):
         try:
-            query = "INSERT INTO country (country_name) VALUES (%s) ON CONFLICT (country_name) DO NOTHING RETURNING country_id"
-            self.cursor.execute(query, (country_name,))
+            columns = data.keys()
+            values = tuple(data.values())
+            placeholders = ', '.join(['%s'] * len(values))
+            query = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders}) ON CONFLICT DO NOTHING RETURNING {table_name}_id"
+            self.cursor.execute(query, values)
             result = self.cursor.fetchone()
+            self.connection.commit()
             if result:
                 return result[0]
             else:
-                query = "SELECT country_id FROM country WHERE country_name = %s"
-                self.cursor.execute(query, (country_name,))
+                select_query = f"SELECT {table_name}_id FROM {table_name} WHERE " + " AND ".join([f"{col} = %s" for col in columns])
+                self.cursor.execute(select_query, values)
                 return self.cursor.fetchone()[0]
         except Error as e:
             self.connection.rollback()
-            logging.error(f"Error while inserting country: {e}")
+            logging.error(f"Error while inserting into {table_name}: {e}")
             return None
 
-    def _insert_university(self, university_name, country_id):
-        try:
-            query = "INSERT INTO university (university_name, country_id) VALUES (%s, %s) ON CONFLICT DO NOTHING"
-            self.cursor.execute(query, (university_name, country_id))
-            self.connection.commit()
-            logging.info(f"Inserted university: {university_name}")
-        except Error as e:
-            self.connection.rollback()
-            logging.error(f"Error while inserting university: {e}")
-
-    def _insert_person(self, person_data, country_id):
-        try:
-            query = """
-            INSERT INTO person (first_name, last_name, email, gender, country_id)
-            VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING
-            """
-            self.cursor.execute(query, (
-                person_data['name']['first'],
-                person_data['name']['last'],
-                person_data['email'],
-                person_data['gender'],
-                country_id
-            ))
-            self.connection.commit()
-            logging.info(f"Inserted person: {person_data['name']['first']} {person_data['name']['last']}")
-        except Error as e:
-            self.connection.rollback()
-            logging.error(f"Error while inserting person: {e}")
-
+    def _flatten_person_data(self, person_data):
+        flattened = {
+            "first_name": person_data['name']['first'],
+            "last_name": person_data['name']['last'],
+            "email": person_data['email'],
+            "gender": person_data['gender'],
+            "country": person_data['location']['country']
+        }
+        return flattened
