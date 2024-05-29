@@ -13,7 +13,7 @@ def log_time(func):
         return result
     return wrapper
 
-class APIFetch:
+class DataHandler:
     def __init__(self, connection, cursor):
         self.connection = connection
         self.cursor = cursor

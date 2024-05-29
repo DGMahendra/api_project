@@ -1,12 +1,12 @@
 import logging
 import psycopg2
-from api_helper import APIFetch
+from api_helper import DataHandler
 
 def main():
     connection = psycopg2.connect(database="api_db2", user="postgres", password="Password@186", host="localhost", port="5432")
     cursor = connection.cursor()
 
-    loader = APIFetch(connection, cursor)
+    loader = DataHandler(connection, cursor)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     
     countries = ["india", "usa", "uk", "canada", "australia", "germany", "france", "italy", "spain", "japan", "china", "brazil", "russia", "south africa", "mexico", "south korea", "netherlands", "switzerland", "sweden", "belgium"]
